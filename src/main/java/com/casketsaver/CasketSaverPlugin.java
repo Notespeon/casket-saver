@@ -3,12 +3,12 @@ package com.casketsaver;
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
-import net.runelite.api.events.GameTick;
-import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.events.MenuOptionClicked;
-import net.runelite.api.events.PostMenuSort;
+import net.runelite.api.events.*;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.widgets.ComponentID;
+import net.runelite.api.widgets.InterfaceID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -18,6 +18,7 @@ import net.runelite.client.util.Text;
 import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Objects;
 
 import static net.runelite.api.ItemID.*;
 
@@ -42,6 +43,7 @@ public class CasketSaverPlugin extends Plugin
 	private ItemContainer bankContainer;
 	private boolean hasMasterClueInventory = false;
 	private boolean hasMasterClueBanked = false;
+	private boolean hasMasterClueReward = false;
 	private int casketCooldown;
 
 	@Subscribe
@@ -65,9 +67,23 @@ public class CasketSaverPlugin extends Plugin
 						if (!hasMasterClueInventory && item.getId() == CLUE_SCROLL_MASTER) {
 							hasMasterClueInventory = true;
 							hasMasterClueBanked = false;
+							hasMasterClueReward = false;
 						}
 					});
 
+		}
+	}
+
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.CLUESCROLL_REWARD) {
+			final Widget clueScrollReward = client.getWidget(ComponentID.CLUESCROLL_REWARD_ITEM_CONTAINER);
+
+            for (Widget widget : Objects.requireNonNull(clueScrollReward.getChildren())) {
+				if (widget.getItemId() == CLUE_SCROLL_MASTER) {
+					hasMasterClueReward = true;
+				}
+			}
 		}
 	}
 
@@ -121,7 +137,7 @@ public class CasketSaverPlugin extends Plugin
 
 	private void checkCaskets(MenuEntry[] menuEntries, int index) {
 		MenuEntry menuEntry = menuEntries[index];
-		boolean hasMasterClue = hasMasterClueBanked || hasMasterClueInventory;
+		boolean hasMasterClue = hasMasterClueBanked || hasMasterClueInventory || hasMasterClueReward;
 		if ((menuEntry.getItemId() == REWARD_CASKET_EASY)
 				&& config.easyMode() && hasMasterClue) {
 			doSwaps(menuEntries);
