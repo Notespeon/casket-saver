@@ -28,6 +28,7 @@ package com.casketsaver;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 
 @ConfigGroup("CasketSaver")
 public interface CasketSaverConfig extends Config
@@ -94,6 +95,33 @@ public interface CasketSaverConfig extends Config
 		position = 5
 	)
 	default boolean masterCooldown()
+	{
+		return true;
+	}
+
+	@ConfigSection(name = "Overlays", description = "Options that effect overlays", position = 6)
+	String overlaysSection = "Overlays";
+
+	@ConfigItem(
+		keyName = "showInfobox",
+		name = "Show infobox",
+		description = "Show infobox indicating when caskets are being saved",
+		section = overlaysSection,
+		position = 0
+	)
+	default boolean showInfobox()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showTooltip",
+		name = "Show tooltip",
+		description = "Show tooltip on casket \"Open\" hover when caskets are being saved",
+		section = overlaysSection,
+		position = 1
+	)
+	default boolean showTooltip()
 	{
 		return true;
 	}
