@@ -87,7 +87,6 @@ public class CasketSaverPlugin extends Plugin
 	private CasketSaverConfig config;
 	private MasterLocation masterLocation = MasterLocation.UNKNOWN;
 	private boolean masterDeposited = false;
-	private boolean masterDropped = false;
 	private boolean hasMasterClueCooldown = false;
 	private int casketCooldown;
 
@@ -125,22 +124,16 @@ public class CasketSaverPlugin extends Plugin
 	@Subscribe
 	public void onWidgetClosed(WidgetClosed event)
 	{
-		// When bank interface is closed, check if existing master was deposited
-		if (event.getGroupId() == InterfaceID.BANK && masterLocation.equals(MasterLocation.INVENTORY))
+		if (event.getGroupId() == InterfaceID.CLUESCROLL_REWARD && masterLocation.equals(MasterLocation.REWARD))
 		{
-			ItemContainer inventoryContainer = client.getItemContainer(InventoryID.INVENTORY);
-
-			if (inventoryContainer != null)
-			{
-				checkContainer(inventoryContainer, MasterLocation.INVENTORY);
-			}
+			setMasterLocation(MasterLocation.UNKNOWN);
 		}
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		// Check for banked clues when none have been located
+		// Check for banked clues when location is unknown
 		if (event.getGroupId() == InterfaceID.BANK && masterLocation.equals(MasterLocation.UNKNOWN))
 		{
 			ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
@@ -163,7 +156,6 @@ public class CasketSaverPlugin extends Plugin
 		if (event.getItemId() == ItemID.CLUE_SCROLL_MASTER)
 		{
 			masterDeposited = event.getMenuOption().contains("Deposit");
-			masterDropped = event.getMenuOption().contains("Drop");
 		}
 
 		// Consume Casket Open events
@@ -215,8 +207,8 @@ public class CasketSaverPlugin extends Plugin
 		// If master was previously located in container and not found, update location
 		else if (masterLocation.equals(location))
 		{
-			// Check if it was banked or dropped
-			if (location.equals(MasterLocation.INVENTORY) && (masterDeposited || !masterDropped))
+			// Check if it was banked
+			if (location.equals(MasterLocation.INVENTORY) && masterDeposited)
 			{
 				setMasterLocation(MasterLocation.BANK);
 			}
