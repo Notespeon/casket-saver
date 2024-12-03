@@ -26,6 +26,7 @@
 package com.casketsaver;
 
 import com.google.inject.Provides;
+import java.awt.Color;
 import java.time.temporal.ChronoUnit;
 import java.util.TimerTask;
 import lombok.extern.slf4j.Slf4j;
@@ -35,16 +36,19 @@ import net.runelite.api.Client;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.overlay.infobox.InfoBox;
 import net.runelite.client.ui.overlay.infobox.Timer;
 import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
+import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.ColorUtil;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -56,16 +60,14 @@ import static net.runelite.api.ItemID.*;
 )
 public class CasketSaverPlugin extends Plugin
 {
-	public ArrayList<Integer> casketIds = new ArrayList<Integer>()
-	{{
-		add(REWARD_CASKET_EASY);
-		add(REWARD_CASKET_MEDIUM);
-		add(REWARD_CASKET_HARD);
-		add(REWARD_CASKET_ELITE);
-	}};
-
 	@Inject
 	private Client client;
+
+	@Inject
+	private ClientThread clientThread;
+
+	@Inject
+	private ConfigManager configManager;
 
 	@Inject
 	ItemManager itemManager;
@@ -73,74 +75,91 @@ public class CasketSaverPlugin extends Plugin
 	@Inject
 	private InfoBoxManager infoBoxManager;
 
+	private InfoBox infoBox = null;
+
+	@Inject
+	private OverlayManager overlayManager;
+
+	@Inject
+	private CasketSaverOverlay infoOverlay;
+
 	@Inject
 	private CasketSaverConfig config;
-	private ItemContainer bankContainer;
-	private boolean hasMasterClueInventory = false;
-	private boolean hasMasterClueBanked = false;
-	private boolean hasMasterClueReward = false;
+	private MasterLocation masterLocation = MasterLocation.UNKNOWN;
+	private boolean masterDeposited = false;
 	private boolean hasMasterClueCooldown = false;
 	private int casketCooldown;
+
+	@Override
+	protected void startUp() throws Exception
+	{
+		overlayManager.add(infoOverlay);
+		clientThread.invoke(this::loadFromConfig);
+	}
+
+	@Override
+	protected void shutDown() throws Exception
+	{
+		removeInfoBox();
+
+		overlayManager.remove(infoOverlay);
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged gameStateChanged) {
+		if (gameStateChanged.getGameState() == GameState.LOGGED_IN) {
+			clientThread.invoke(this::loadFromConfig);
+		}
+	}
+
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (event.getContainerId() == InventoryID.INVENTORY.getId() )
+		if (event.getContainerId() == InventoryID.INVENTORY.getId())
 		{
-			bankContainer = client.getItemContainer(InventoryID.BANK);
+			checkContainer(event.getItemContainer(), MasterLocation.INVENTORY);
+		}
+	}
 
-			if (bankContainer != null)
-			{
-				hasMasterClueBanked = false;
-				Arrays.stream(bankContainer.getItems())
-						.forEach(item ->
-						{
-							if (!hasMasterClueBanked && item.getId() == CLUE_SCROLL_MASTER)
-							{
-								hasMasterClueBanked = true;
-							}
-						});
-			}
-
-			hasMasterClueInventory = false;
-			Arrays.stream(event.getItemContainer().getItems())
-					.forEach(item ->
-					{
-						if (!hasMasterClueInventory && item.getId() == CLUE_SCROLL_MASTER)
-						{
-							hasMasterClueInventory = true;
-							hasMasterClueBanked = false;
-							hasMasterClueReward = false;
-						}
-					});
-
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event)
+	{
+		if (event.getGroupId() == InterfaceID.CLUESCROLL_REWARD && masterLocation.equals(MasterLocation.REWARD))
+		{
+			setMasterLocation(MasterLocation.UNKNOWN);
 		}
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		if (event.getGroupId() == InterfaceID.CLUESCROLL_REWARD)
+		// Check for banked clues when location is unknown
+		if (event.getGroupId() == InterfaceID.BANK && masterLocation.equals(MasterLocation.UNKNOWN))
 		{
-			final Widget clueScrollReward = client.getWidget(ComponentID.CLUESCROLL_REWARD_ITEM_CONTAINER);
+			ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
 
-			for (Widget widget : Objects.requireNonNull(clueScrollReward.getChildren()))
+			if (bankContainer != null)
 			{
-				if (widget.getItemId() == CLUE_SCROLL_MASTER)
-				{
-					hasMasterClueReward = true;
-					if (config.masterCooldown())
-					{
-						startMasterCooldown();
-					}
-				}
+				checkContainer(bankContainer, MasterLocation.BANK);
 			}
+		}
+		else if (event.getGroupId() == InterfaceID.CLUESCROLL_REWARD)
+		{
+			checkReward();
 		}
 	}
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		if (event.isItemOp() && casketIds.contains(event.getItemId()) && event.getMenuOption().equals("Open"))
+		// Track master interactions to detect banking edge cases
+		if (event.getItemId() == ItemID.CLUE_SCROLL_MASTER)
+		{
+			masterDeposited = event.getMenuOption().contains("Deposit");
+		}
+
+		// Consume Casket Open events
+		if (event.isItemOp() && isCasketToSave(event.getItemId()) && event.getMenuOption().equals("Open"))
 		{
 			if (hasMasterClue())
 			{
@@ -164,6 +183,8 @@ public class CasketSaverPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		handleInfoBox();
+
 		if (config.casketCooldown())
 		{
 			casketCooldown = 0;
@@ -176,29 +197,171 @@ public class CasketSaverPlugin extends Plugin
 		return configManager.getConfig(CasketSaverConfig.class);
 	}
 
+	private void checkContainer(ItemContainer container, MasterLocation location)
+	{
+		if (Arrays.stream(container.getItems())
+			.anyMatch(item -> item.getId() == CLUE_SCROLL_MASTER))
+		{
+			setMasterLocation(location);
+		}
+		// If master was previously located in container and not found, update location
+		else if (masterLocation.equals(location))
+		{
+			// Check if it was banked
+			if (location.equals(MasterLocation.INVENTORY) && masterDeposited)
+			{
+				setMasterLocation(MasterLocation.BANK);
+			}
+			else
+			{
+				setMasterLocation(MasterLocation.UNKNOWN);
+			}
+		}
+	}
+
+	private void checkReward()
+	{
+		final Widget clueScrollReward = client.getWidget(ComponentID.CLUESCROLL_REWARD_ITEM_CONTAINER);
+
+		for (Widget widget : Objects.requireNonNull(clueScrollReward.getChildren()))
+		{
+			if (widget.getItemId() == CLUE_SCROLL_MASTER)
+			{
+				setMasterLocation(MasterLocation.REWARD);
+				if (config.masterCooldown())
+				{
+					startMasterCooldown();
+				}
+			}
+		}
+	}
+
+	public String getCause()
+	{
+		if (masterLocation.equals(MasterLocation.UNKNOWN))
+		{
+			return null;
+		}
+
+		StringBuilder savingCause = new StringBuilder()
+			.append(ColorUtil.wrapWithColorTag("Casket Saver: ", Color.YELLOW))
+			.append(ColorUtil.wrapWithColorTag("active", Color.GREEN))
+			.append(ColorUtil.wrapWithColorTag("</br>Cause: ", Color.YELLOW))
+			.append("Master clue ");
+		if (hasMasterClueCooldown)
+		{
+			savingCause.append(ColorUtil.wrapWithColorTag("cooldown", Color.RED));
+		}
+		else if (masterLocation.equals(MasterLocation.BANK))
+		{
+			savingCause.append("in ").append(ColorUtil.wrapWithColorTag("bank", Color.RED));
+		}
+		else if (masterLocation.equals(MasterLocation.INVENTORY))
+		{
+			savingCause.append("in ").append(ColorUtil.wrapWithColorTag("inventory", Color.RED));
+		}
+		else if (masterLocation.equals(MasterLocation.REWARD))
+		{
+			savingCause.append("in ").append(ColorUtil.wrapWithColorTag("clue reward", Color.RED));
+		}
+		return savingCause.toString();
+	}
+
+	private void handleInfoBox()
+	{
+		var isShowing = infoBox != null;
+		var shouldShow = config.showInfobox() && !masterLocation.equals(MasterLocation.UNKNOWN);
+
+		if (isShowing && !shouldShow)
+		{
+			removeInfoBox();
+		}
+		else if (shouldShow)
+		{
+			if (!isShowing)
+			{
+				infoBox = new InfoBox(itemManager.getImage(CASKET), this)
+				{
+					@Override
+					public String getText()
+					{
+						return "";
+					}
+
+					@Override
+					public Color getTextColor()
+					{
+						return null;
+					}
+				};
+			}
+
+			infoBox.setTooltip(getCause());
+
+			if (!isShowing)
+			{
+				infoBoxManager.addInfoBox(infoBox);
+			}
+		}
+	}
+
+	private boolean hasMasterClue()
+	{
+		return !masterLocation.equals(MasterLocation.UNKNOWN) || hasMasterClueCooldown;
+	}
+
+	public boolean isCasketToSave(Integer itemId)
+	{
+		return (itemId == REWARD_CASKET_EASY && config.easyMode())
+			|| (itemId == REWARD_CASKET_MEDIUM && config.mediumMode())
+			|| (itemId == REWARD_CASKET_HARD && config.hardMode())
+			|| (itemId == REWARD_CASKET_ELITE && config.eliteMode());
+	}
+
+	private void loadFromConfig()
+	{
+		MasterLocation loadedMasterLocation = configManager.getRSProfileConfiguration("casketsaver", "masterLocation", MasterLocation.class);
+		if (loadedMasterLocation != null)
+		{
+			masterLocation = loadedMasterLocation;
+		}
+	}
+
+	private void removeInfoBox()
+	{
+		if (infoBox != null)
+		{
+			infoBoxManager.removeInfoBox(infoBox);
+			infoBox = null;
+		}
+	}
+
 	private void saveCasket(MenuOptionClicked event)
 	{
-		if ((event.getItemId() == REWARD_CASKET_EASY && config.easyMode())
-				|| (event.getItemId() == REWARD_CASKET_MEDIUM && config.mediumMode())
-				|| (event.getItemId() == REWARD_CASKET_HARD && config.hardMode())
-				|| (event.getItemId() == REWARD_CASKET_ELITE && config.eliteMode()))
+		if (isCasketToSave(event.getItemId()))
 		{
 			event.consume();
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Casket Saver prevents you from opening this casket.", "");
 		}
 	}
 
-	private boolean hasMasterClue()
+	private void setMasterLocation(MasterLocation location)
 	{
-		return hasMasterClueBanked || hasMasterClueInventory || hasMasterClueReward || hasMasterClueCooldown;
+		masterDeposited = false;
+		masterLocation = location;
+		configManager.setRSProfileConfiguration("casketsaver", "masterLocation", masterLocation);
 	}
 
 	private void startMasterCooldown()
 	{
-		Timer timer = new Timer(30, ChronoUnit.SECONDS, itemManager.getImage(ItemID.CLUE_SCROLL_MASTER), this);
+		hasMasterClueCooldown = true;
+
+		// Start timer infobox
+		Timer timer = new Timer(30, ChronoUnit.SECONDS, itemManager.getImage(CASKET), this);
+		timer.setTooltip(getCause());
 		infoBoxManager.addInfoBox(timer);
 
-		hasMasterClueCooldown = true;
+		// Start 30-second timer
 		java.util.Timer t = new java.util.Timer();
 		TimerTask task = new TimerTask()
 		{
@@ -208,7 +371,6 @@ public class CasketSaverPlugin extends Plugin
 				hasMasterClueCooldown = false;
 			}
 		};
-
 		t.schedule(task, 30000);
 	}
 }
