@@ -44,10 +44,12 @@ import static net.runelite.api.ItemID.REWARD_CASKET_EASY;
 import static net.runelite.api.ItemID.REWARD_CASKET_ELITE;
 import static net.runelite.api.ItemID.REWARD_CASKET_HARD;
 import static net.runelite.api.ItemID.REWARD_CASKET_MEDIUM;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.MenuShouldLeftClick;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.ComponentID;
@@ -183,6 +185,19 @@ public class CasketSaverPlugin extends Plugin
 				{
 					event.consume();
 				}
+			}
+		}
+	}
+
+	@Subscribe
+	public void onMenuShouldLeftClick(MenuShouldLeftClick event)
+	{
+		MenuEntry[] menuEntries = client.getMenuEntries();
+		for (MenuEntry entry : menuEntries)
+		{
+			if (entry.getOption().equals("Deposit inventory"))
+			{
+				masterDeposited = true;
 			}
 		}
 	}
