@@ -27,10 +27,8 @@ package com.casketsaver;
 
 import com.google.inject.Provides;
 import java.awt.Color;
-import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.TimerTask;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -64,7 +62,6 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.infobox.InfoBox;
 import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
-import net.runelite.client.ui.overlay.infobox.Timer;
 import net.runelite.client.util.ColorUtil;
 
 @Slf4j
@@ -100,7 +97,6 @@ public class CasketSaverPlugin extends Plugin
 	private CasketSaverConfig config;
 	private MasterLocation masterLocation = MasterLocation.UNKNOWN;
 	private boolean masterDeposited = false;
-	private boolean hasMasterClueCooldown = false;
 	private int casketCooldown;
 
 	@Override
@@ -259,10 +255,6 @@ public class CasketSaverPlugin extends Plugin
 			if (widget.getItemId() == CLUE_SCROLL_MASTER)
 			{
 				setMasterLocation(MasterLocation.REWARD);
-				if (config.masterCooldown())
-				{
-					startMasterCooldown();
-				}
 			}
 		}
 	}
@@ -279,11 +271,7 @@ public class CasketSaverPlugin extends Plugin
 			.append(ColorUtil.wrapWithColorTag("active", Color.GREEN))
 			.append(ColorUtil.wrapWithColorTag("<br>Cause: ", Color.YELLOW))
 			.append("Master clue ");
-		if (hasMasterClueCooldown)
-		{
-			savingCause.append(ColorUtil.wrapWithColorTag("cooldown", Color.RED));
-		}
-		else if (masterLocation.equals(MasterLocation.BANK))
+		if (masterLocation.equals(MasterLocation.BANK))
 		{
 			savingCause.append("in ").append(ColorUtil.wrapWithColorTag("bank", Color.RED));
 		}
@@ -338,7 +326,7 @@ public class CasketSaverPlugin extends Plugin
 
 	private boolean hasMasterClue()
 	{
-		return !masterLocation.equals(MasterLocation.UNKNOWN) || hasMasterClueCooldown;
+		return !masterLocation.equals(MasterLocation.UNKNOWN);
 	}
 
 	public boolean isCasketToSave(Integer itemId)
@@ -386,27 +374,5 @@ public class CasketSaverPlugin extends Plugin
 		masterDeposited = false;
 		masterLocation = location;
 		configManager.setRSProfileConfiguration("casketsaver", "masterLocation", masterLocation);
-	}
-
-	private void startMasterCooldown()
-	{
-		hasMasterClueCooldown = true;
-
-		// Start timer infobox
-		Timer timer = new Timer(30, ChronoUnit.SECONDS, itemManager.getImage(CASKET), this);
-		timer.setTooltip(getCause());
-		infoBoxManager.addInfoBox(timer);
-
-		// Start 30-second timer
-		java.util.Timer t = new java.util.Timer();
-		TimerTask task = new TimerTask()
-		{
-			@Override
-			public void run()
-			{
-				hasMasterClueCooldown = false;
-			}
-		};
-		t.schedule(task, 30000);
 	}
 }

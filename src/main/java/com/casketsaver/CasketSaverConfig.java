@@ -88,17 +88,6 @@ public interface CasketSaverConfig extends Config
 		return true;
 	}
 
-	@ConfigItem(
-		keyName = "masterCooldown",
-		name = "Master clue cooldown",
-		description = "Caskets selected above cannot be opened until master clue cooldown is over",
-		position = 5
-	)
-	default boolean masterCooldown()
-	{
-		return true;
-	}
-
 	@ConfigSection(name = "Overlays", description = "Options that effect overlays", position = 6)
 	String overlaysSection = "Overlays";
 
