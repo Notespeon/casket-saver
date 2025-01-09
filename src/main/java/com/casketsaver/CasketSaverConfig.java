@@ -96,7 +96,7 @@ public interface CasketSaverConfig extends Config
 	)
 	default boolean masterCooldown()
 	{
-		return true;
+		return false;
 	}
 
 	@ConfigSection(name = "Overlays", description = "Options that effect overlays", position = 6)
